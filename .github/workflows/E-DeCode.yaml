@@ -1,10 +1,10 @@
-name: Download from Commit
+name: Download from Commit & Save to Repo
 on:
   push:
     branches:
       - "**"
 jobs:
-  download:
+  save-file:
     if: contains(github.event.head_commit.message, 'download:') || contains(github.event.head_commit.message, 'download-zip:')
     runs-on: ubuntu-latest
     permissions:
@@ -16,128 +16,97 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install aria2
-        run: sudo apt-get install -y aria2 zip
+        run: sudo apt-get install -y aria2
 
-      - name: Download files
+      - name: Extract URLs and download files
         run: |
           MSG=$(git log -1 --pretty=%B)
-          
-          if echo "$MSG" | grep -q 'download-zip:'; then
+          echo "Commit message: $MSG"
+
+          if echo "$MSG" | grep -qP 'download-zip:'; then
             MODE="zip"
-            URLS=$(echo "$MSG" | sed -n 's/.*download-zip:[[:space:]]*//p')
-          else
+            URL_LINE=$(echo "$MSG" | grep -oP 'download-zip:\s*\K.*')
+          elif echo "$MSG" | grep -qP 'download:'; then
             MODE="normal"
-            URLS=$(echo "$MSG" | sed -n 's/.*download:[[:space:]]*//p')
+            URL_LINE=$(echo "$MSG" | grep -oP 'download:\s*\K.*')
+          else
+            echo "❌ No download command found in commit message"
+            exit 1
           fi
 
-          mkdir -p downloads tmp
-          cd tmp
+          echo "Mode: $MODE"
+          mkdir -p downloads tmp_downloads
 
-          for URL in $URLS; do
-            aria2c -x 16 -s 16 -k 1M --console-log-level=error "$URL"
+          for URL in $URL_LINE; do
+            FILENAME=$(basename "$URL")
+            echo "⬇️ Downloading $URL -> $FILENAME"
+
+            aria2c \
+              --split=2 \
+              --max-connection-per-server=2 \
+              --min-split-size=90M \
+              --dir="tmp_downloads" \
+              "$URL"
           done
 
-          cd ..
-
           if [ "$MODE" = "zip" ]; then
-            ARCHIVE="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
-            zip -j "$ARCHIVE" tmp/*
+            ARCHIVE_NAME="tmp_downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
+            zip -j "$ARCHIVE_NAME" tmp_downloads/*
           fi
 
-          for FILE in tmp/*; do
+          # Split any file over 90MB using zip native split (unzip compatible)
+          for FILE in tmp_downloads/*; do
             [ -f "$FILE" ] || continue
             SIZE=$(stat -c%s "$FILE")
+            LIMIT=$((90 * 1024 * 1024))
             BASENAME=$(basename "$FILE")
 
-            if [ "$SIZE" -gt 90000000 ]; then
-              echo "Splitting $BASENAME ($(( SIZE / 1024 / 1024 ))MB)"
+            if [ "$SIZE" -gt "$LIMIT" ]; then
+              echo "✂️ $BASENAME is $(( SIZE / 1024 / 1024 ))MB — splitting with zip..."
+              # zip -s creates: file.zip, file.z01, file.z02, ...
               zip -0 -s 90m "downloads/${BASENAME}.zip" -j "$FILE"
+              echo "✅ Parts: $(ls downloads/${BASENAME}* | wc -l)"
             else
               cp "$FILE" "downloads/$BASENAME"
             fi
           done
 
-          rm -rf tmp
+          rm -rf tmp_downloads
 
-      - name: Push
+      - name: Commit & Push in batches of 5 files
         run: |
+          BRANCH="${GITHUB_REF_NAME}"
           git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          
-          git add downloads/
-          git diff --cached --quiet && exit 0
-          
-          git commit -m "add files [skip ci]"
-          git pull --rebase origin ${{ github.ref_name }}
-          git push origin HEAD:${{ github.ref_name }}name: Download from Commit
-on:
-  push:
-    branches:
-      - "**"
-jobs:
-  download:
-    if: contains(github.event.head_commit.message, 'download:') || contains(github.event.head_commit.message, 'download-zip:')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          git config user.email "github-actions@github.com"
 
-      - name: Install aria2
-        run: sudo apt-get install -y aria2 zip
+          # Collect all new/untracked files under downloads/
+          mapfile -t ALL_FILES < <(git ls-files --others --modified --exclude-standard downloads/)
 
-      - name: Download files
-        run: |
-          MSG=$(git log -1 --pretty=%B)
-          
-          if echo "$MSG" | grep -q 'download-zip:'; then
-            MODE="zip"
-            URLS=$(echo "$MSG" | sed -n 's/.*download-zip:[[:space:]]*//p')
-          else
-            MODE="normal"
-            URLS=$(echo "$MSG" | sed -n 's/.*download:[[:space:]]*//p')
+          TOTAL=${#ALL_FILES[@]}
+          echo "📦 Total files to push: $TOTAL"
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "Nothing to commit"
+            exit 0
           fi
 
-          mkdir -p downloads tmp
-          cd tmp
+          BATCH_SIZE=5
+          BATCH_NUM=0
 
-          for URL in $URLS; do
-            aria2c -x 16 -s 16 -k 1M --console-log-level=error "$URL"
+          for (( i=0; i<TOTAL; i+=BATCH_SIZE )); do
+            BATCH_NUM=$(( BATCH_NUM + 1 ))
+            BATCH=("${ALL_FILES[@]:i:BATCH_SIZE}")
+
+            echo "🚀 Pushing batch $BATCH_NUM: files $((i+1))–$(( i + ${#BATCH[@]} )) of $TOTAL"
+
+            git add "${BATCH[@]}"
+            git commit -m "Add downloaded files — batch $BATCH_NUM [skip ci]"
+
+            # Pull with rebase before each push to avoid conflicts from prior batches
+            git pull --rebase origin "$BRANCH"
+            git push origin HEAD:"$BRANCH"
+
+            echo "✅ Batch $BATCH_NUM pushed"
           done
 
-          cd ..
-
-          if [ "$MODE" = "zip" ]; then
-            ARCHIVE="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
-            zip -j "$ARCHIVE" tmp/*
-          fi
-
-          for FILE in tmp/*; do
-            [ -f "$FILE" ] || continue
-            SIZE=$(stat -c%s "$FILE")
-            BASENAME=$(basename "$FILE")
-
-            if [ "$SIZE" -gt 90000000 ]; then
-              echo "Splitting $BASENAME ($(( SIZE / 1024 / 1024 ))MB)"
-              zip -0 -s 90m "downloads/${BASENAME}.zip" -j "$FILE"
-            else
-              cp "$FILE" "downloads/$BASENAME"
-            fi
-          done
-
-          rm -rf tmp
-
-      - name: Push
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          
-          git add downloads/
-          git diff --cached --quiet && exit 0
-          
-          git commit -m "add files [skip ci]"
-          git pull --rebase origin ${{ github.ref_name }}
-          git push origin HEAD:${{ github.ref_name }}
+          echo "🎉 All $TOTAL files pushed in $BATCH_NUM batch(es)"
