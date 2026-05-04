@@ -1,0 +1,143 @@
+name: Download from Commit
+on:
+  push:
+    branches:
+      - "**"
+jobs:
+  download:
+    if: contains(github.event.head_commit.message, 'download:') || contains(github.event.head_commit.message, 'download-zip:')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install aria2
+        run: sudo apt-get install -y aria2 zip
+
+      - name: Download files
+        run: |
+          MSG=$(git log -1 --pretty=%B)
+          
+          if echo "$MSG" | grep -q 'download-zip:'; then
+            MODE="zip"
+            URLS=$(echo "$MSG" | sed -n 's/.*download-zip:[[:space:]]*//p')
+          else
+            MODE="normal"
+            URLS=$(echo "$MSG" | sed -n 's/.*download:[[:space:]]*//p')
+          fi
+
+          mkdir -p downloads tmp
+          cd tmp
+
+          for URL in $URLS; do
+            aria2c -x 16 -s 16 -k 1M --console-log-level=error "$URL"
+          done
+
+          cd ..
+
+          if [ "$MODE" = "zip" ]; then
+            ARCHIVE="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
+            zip -j "$ARCHIVE" tmp/*
+          fi
+
+          for FILE in tmp/*; do
+            [ -f "$FILE" ] || continue
+            SIZE=$(stat -c%s "$FILE")
+            BASENAME=$(basename "$FILE")
+
+            if [ "$SIZE" -gt 90000000 ]; then
+              echo "Splitting $BASENAME ($(( SIZE / 1024 / 1024 ))MB)"
+              zip -0 -s 90m "downloads/${BASENAME}.zip" -j "$FILE"
+            else
+              cp "$FILE" "downloads/$BASENAME"
+            fi
+          done
+
+          rm -rf tmp
+
+      - name: Push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          
+          git add downloads/
+          git diff --cached --quiet && exit 0
+          
+          git commit -m "add files [skip ci]"
+          git pull --rebase origin ${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }}name: Download from Commit
+on:
+  push:
+    branches:
+      - "**"
+jobs:
+  download:
+    if: contains(github.event.head_commit.message, 'download:') || contains(github.event.head_commit.message, 'download-zip:')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install aria2
+        run: sudo apt-get install -y aria2 zip
+
+      - name: Download files
+        run: |
+          MSG=$(git log -1 --pretty=%B)
+          
+          if echo "$MSG" | grep -q 'download-zip:'; then
+            MODE="zip"
+            URLS=$(echo "$MSG" | sed -n 's/.*download-zip:[[:space:]]*//p')
+          else
+            MODE="normal"
+            URLS=$(echo "$MSG" | sed -n 's/.*download:[[:space:]]*//p')
+          fi
+
+          mkdir -p downloads tmp
+          cd tmp
+
+          for URL in $URLS; do
+            aria2c -x 16 -s 16 -k 1M --console-log-level=error "$URL"
+          done
+
+          cd ..
+
+          if [ "$MODE" = "zip" ]; then
+            ARCHIVE="downloads/archive_$(date +%Y%m%d_%H%M%S).zip"
+            zip -j "$ARCHIVE" tmp/*
+          fi
+
+          for FILE in tmp/*; do
+            [ -f "$FILE" ] || continue
+            SIZE=$(stat -c%s "$FILE")
+            BASENAME=$(basename "$FILE")
+
+            if [ "$SIZE" -gt 90000000 ]; then
+              echo "Splitting $BASENAME ($(( SIZE / 1024 / 1024 ))MB)"
+              zip -0 -s 90m "downloads/${BASENAME}.zip" -j "$FILE"
+            else
+              cp "$FILE" "downloads/$BASENAME"
+            fi
+          done
+
+          rm -rf tmp
+
+      - name: Push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          
+          git add downloads/
+          git diff --cached --quiet && exit 0
+          
+          git commit -m "add files [skip ci]"
+          git pull --rebase origin ${{ github.ref_name }}
+          git push origin HEAD:${{ github.ref_name }}
