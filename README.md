@@ -1,4 +1,4 @@
-## How to use the download command.
+## How to use the download command. 
 
 **Single file:**
 
