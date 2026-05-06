@@ -36,4 +36,3 @@ download: https://example.com/file1.zip https://example.com/file2.jpg https://ex
 download-zip: https://example.com/file1.pdf https://example.com/file2.png https://example.com/file3.docx
 ```
 
-> Just put the command plus your URLs in the commit message when saving any file edit.
