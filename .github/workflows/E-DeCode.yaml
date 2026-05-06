@@ -21,8 +21,8 @@ jobs:
       contents: write
     
     env:
-      SPLIT_SIZE: "95m"
-      MAX_FILE_SIZE_MB: 95
+      SPLIT_SIZE: "45m"
+      MAX_FILE_SIZE_MB: 45
       ARIA2_SPLIT: 4
       ARIA2_MAX_CONN: 4
       ARIA2_MIN_SPLIT_SIZE: "20M"
@@ -48,10 +48,8 @@ jobs:
 
       - name: Creator info
         run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "👤 Created by: ElectronicBox"
-          echo "🔗 https://github.com/ElectronicBox"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+         printf "👤 Created by: ElectronicBox\n"
+         printf "🔗 https://github.com/ElectronicBox\n"
 
       - name: Parse commit message and download files
         id: download
@@ -149,7 +147,7 @@ jobs:
           echo "✂️ SPLITTING LARGE FILES"
           
           LARGE_FILES=0
-          SPLIT_SIZE_BYTES=$((95 * 1024 * 1024))
+          SPLIT_SIZE_BYTES=$((45 * 1024 * 1024))
           
           for FILE in ${{ env.TEMP_DIR }}/*; do
             [ -f "$FILE" ] || continue
@@ -160,7 +158,7 @@ jobs:
             
             if [ "$SIZE" -gt "$SPLIT_SIZE_BYTES" ]; then
               LARGE_FILES=$((LARGE_FILES + 1))
-              CHUNKS=$(( (SIZE + 95*1024*1024 - 1) / (95*1024*1024) ))
+              CHUNKS=$(( (SIZE + 45*1024*1024 - 1) / (45*1024*1024) ))
               echo "✂️ Splitting $BASENAME (${SIZE_MB}MB) into $CHUNKS part(s)"
               
               zip -0 -s "${{ env.SPLIT_SIZE }}" \
