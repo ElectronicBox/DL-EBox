@@ -42,9 +42,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y aria2 zip unzip bc
-          
           mkdir -p "${{ env.DOWNLOAD_DIR }}" "${{ env.TEMP_DIR }}"
-          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
@@ -58,9 +56,7 @@ jobs:
       - name: Parse commit message and download files
         id: download
         run: |
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "🔍 PARSING COMMIT MESSAGE"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
           MSG=$(git log -1 --pretty=%B)
           echo "📝 Message: $MSG"
@@ -84,14 +80,9 @@ jobs:
           fi
           
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo ""
-          echo "🔗 URLs to download:"
-          echo "$URL_LINE" | tr ' ' '\n' | nl -w2 -s') '
-          echo ""
+          echo "🔗 URLs to download: $(echo $URL_LINE | wc -w) URL(s)"
           
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "⬇️ DOWNLOADING FILES"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
           for URL in $URL_LINE; do
             [ -z "$URL" ] && continue
@@ -114,26 +105,31 @@ jobs:
               --timeout=30 \
               --max-tries=5 \
               --retry-wait=5 \
-              --continue=true \
-              --console-log-level=warn \
-              --summary-interval=1 \
+              --console-log-level=error \
+              --summary-interval=0 \
+              --quiet=true \
+              --download-result=default \
               --user-agent="Mozilla/5.0 (compatible; GitHubActions/1.0)" \
               --header="Accept: */*" \
               --dir="${{ env.TEMP_DIR }}" \
               --out="$FILENAME" \
-              "$URL"
+              "$URL" > /dev/null 2>&1
+            
+            if [ $? -eq 0 ]; then
+              FILE_SIZE=$(du -h "${{ env.TEMP_DIR }}/$FILENAME" | cut -f1)
+              echo "✅ Downloaded: $FILENAME ($FILE_SIZE)"
+            else
+              echo "❌ Failed to download: $FILENAME"
+              exit 1
+            fi
           done
           
-          echo ""
           echo "✅ All downloads completed successfully!"
 
       - name: Process ZIP mode (if applicable)
         if: steps.download.outputs.mode == 'zip'
         run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "📦 CREATING ZIP ARCHIVE"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           ARCHIVE_NAME="${{ env.TEMP_DIR }}/archive_${TIMESTAMP}.zip"
@@ -141,9 +137,7 @@ jobs:
           if [ -n "$(ls -A ${{ env.TEMP_DIR }} 2>/dev/null)" ]; then
             FILE_COUNT=$(ls -1 ${{ env.TEMP_DIR }} | wc -l)
             echo "📁 Compressing $FILE_COUNT file(s)..."
-            
             zip -j "$ARCHIVE_NAME" ${{ env.TEMP_DIR }}/*
-            
             SIZE=$(du -h "$ARCHIVE_NAME" | cut -f1)
             echo "✅ Archive created: $ARCHIVE_NAME ($SIZE)"
           else
@@ -152,21 +146,14 @@ jobs:
 
       - name: Split large files
         run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✂️ SPLITTING LARGE FILES"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
           LARGE_FILES=0
           SPLIT_SIZE_BYTES=$((95 * 1024 * 1024))
-          FILES=(${{ env.TEMP_DIR }}/*)
-          TOTAL_FILES=${#FILES[@]}
-          CURRENT_FILE=0
           
           for FILE in ${{ env.TEMP_DIR }}/*; do
             [ -f "$FILE" ] || continue
             
-            CURRENT_FILE=$((CURRENT_FILE + 1))
             SIZE=$(stat -c%s "$FILE")
             BASENAME=$(basename "$FILE")
             SIZE_MB=$((SIZE / 1024 / 1024))
@@ -178,31 +165,26 @@ jobs:
               
               zip -0 -s "${{ env.SPLIT_SIZE }}" \
                   "${{ env.DOWNLOAD_DIR }}/${BASENAME}.zip" \
-                  -j "$FILE"
+                  -j "$FILE" > /dev/null 2>&1
               
               PARTS=$(ls "${{ env.DOWNLOAD_DIR }}/${BASENAME}".* 2>/dev/null | wc -l)
-              echo "  ✅ Created $PARTS part(s) (each ≤95MB)"
+              echo "  ✅ Created $PARTS part(s)"
             else
               cp "$FILE" "${{ env.DOWNLOAD_DIR }}/$BASENAME"
               echo "✅ Copied $BASENAME (${SIZE_MB}MB)"
             fi
           done
           
-          echo ""
           echo "✓ Split $LARGE_FILES large file(s)"
 
       - name: Clean up temp directory
         if: always()
         run: |
           rm -rf "${{ env.TEMP_DIR }}"
-          echo "🧹 Cleaned up temporary files"
 
       - name: Verify file sizes before commit
         run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✅ VERIFYING FILE SIZES"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
           FAILED=0
           for FILE in ${{ env.DOWNLOAD_DIR }}/*; do
@@ -212,7 +194,7 @@ jobs:
               BASENAME=$(basename "$FILE")
               
               if [ "$SIZE" -gt 104857600 ]; then
-                echo "❌ $BASENAME: ${SIZE_MB}MB (EXCEEDS 100MB LIMIT!)"
+                echo "❌ $BASENAME: ${SIZE_MB}MB (EXCEEDS LIMIT!)"
                 FAILED=1
               else
                 echo "✅ $BASENAME: ${SIZE_MB}MB"
@@ -220,7 +202,6 @@ jobs:
             fi
           done
           
-          echo ""
           if [ "$FAILED" -eq 1 ]; then
             echo "❌ Some files exceed GitHub's 100MB limit!"
             exit 1
@@ -230,10 +211,7 @@ jobs:
 
       - name: Commit and push changes
         run: |
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "📤 PUSHING TO REPOSITORY"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
           if [ -z "$(git ls-files --others --modified --exclude-standard ${{ env.DOWNLOAD_DIR }}/)" ]; then
             echo "📭 No new files to commit"
@@ -245,7 +223,6 @@ jobs:
           TOTAL_SIZE=$(du -sh "${{ env.DOWNLOAD_DIR }}" | cut -f1)
           
           echo "📦 Total files: $TOTAL | Total size: $TOTAL_SIZE"
-          echo ""
           
           BATCH_SIZE=${{ env.BATCH_SIZE }}
           BATCH_NUM=0
@@ -269,7 +246,6 @@ jobs:
             sleep 1
           done
           
-          echo ""
           echo "🎉 Successfully pushed $TOTAL files in $TOTAL_BATCHES batches"
 
       - name: Cleanup on failure
