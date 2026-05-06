@@ -16,7 +16,7 @@ When you include a special command in your commit message, this workflow automat
 
 
 
-## How to use the download command. 
+
 
 **Single file:**
 
