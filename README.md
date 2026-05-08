@@ -1,6 +1,6 @@
-# 📥 GitHub DL-EBox Download Manager 
+# 📥 GitHub DL-EBox Download Manager  
 
-An automated GitHub Actions workflow that downloads files directly from commit messages and saves them to your repository.
+An automated GitHub Actions workflow that downloads files directly from commit messages and saves them to your repository. 
 
 ## 👤 Author
 
